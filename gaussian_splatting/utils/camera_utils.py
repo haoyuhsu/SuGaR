@@ -13,6 +13,7 @@ from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
+import torch
 
 WARNED = False
 
@@ -46,10 +47,26 @@ def loadCam(args, id, cam_info, resolution_scale):
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
 
+    # depth = torch.from_numpy(cam_info.depth) if cam_info.depth is not None else None
+    # normal = torch.from_numpy(cam_info.normal) if cam_info.normal is not None else None
+        
+    # resize depth and normal
+    depth = None
+    normal = None
+    if cam_info.depth is not None:
+        depth = torch.from_numpy(cam_info.depth).unsqueeze(0).unsqueeze(0)
+        depth = torch.nn.functional.interpolate(depth, (resolution[1], resolution[0]), mode='bilinear', align_corners=True)
+        depth = depth.squeeze(0).squeeze(0)          # (H, W)
+    if cam_info.normal is not None:
+        normal = torch.from_numpy(cam_info.normal).permute(2, 0, 1).unsqueeze(0)
+        normal = torch.nn.functional.interpolate(normal, (resolution[1], resolution[0]), mode='nearest')
+        normal = normal.squeeze(0).permute(1, 2, 0)  # (H, W, 3)
+
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
-                  image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+                  image_name=cam_info.image_name, uid=id, data_device=args.data_device,
+                  depth=depth, normal=normal)
 
 def cameraList_from_camInfos(cam_infos, resolution_scale, args):
     camera_list = []

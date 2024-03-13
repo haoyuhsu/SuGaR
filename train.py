@@ -8,9 +8,9 @@ from sugar_extractors.refined_mesh import extract_mesh_and_texture_from_refined_
 
 
 class AttrDict(dict):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.__dict__ = self
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.__dict__ = self
 
 
 if __name__ == "__main__":

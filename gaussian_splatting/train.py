@@ -12,7 +12,7 @@
 import os
 import torch
 from random import randint
-from utils.loss_utils import l1_loss, ssim
+from utils.loss_utils import l1_loss, ssim, depth_loss, opacity_loss, normal_loss, sparsity_loss
 from gaussian_renderer import render, network_gui
 import sys
 from scene import Scene, GaussianModel
@@ -22,13 +22,11 @@ from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
-try:
-    from torch.utils.tensorboard import SummaryWriter
-    TENSORBOARD_FOUND = True
-except ImportError:
-    TENSORBOARD_FOUND = False
+import wandb
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+os.environ["WANDB_SILENT"] = "true"
+
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, use_wandb = False):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
@@ -84,12 +82,50 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         bg = torch.rand((3), device="cuda") if opt.random_background else background
 
         render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg["render"], render_pkg["viewspace_points"], render_pkg["visibility_filter"], render_pkg["radii"]
-
-        # Loss
+        image, depth, normal, pseudo_normal, viewspace_point_tensor, visibility_filter, radii = \
+            render_pkg["render"], \
+            render_pkg["depth"], \
+            render_pkg["normal"], \
+            render_pkg["pseudo_normal"], \
+            render_pkg["viewspace_points"], \
+            render_pkg["visibility_filter"], \
+            render_pkg["radii"]
+        
+        scene_scale = scene.cameras_extent
+        
+        # RGB Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        loss_rgb = l1_loss(image, gt_image)
+        loss = (1.0 - opt.lambda_dssim) * loss_rgb + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+
+        # Depth Loss
+        loss_depth = torch.tensor(0.0, device="cuda")
+        if opt.lambda_depth > 0:
+            gt_depth = viewpoint_cam.depth.cuda()  # obtained from omnidata
+            loss_depth = depth_loss(depth, gt_depth)
+            loss = loss + opt.lambda_depth * loss_depth
+
+        # Normal Loss (rendered normals & normals estimated from omnidata)
+        loss_normal = torch.tensor(0.0, device="cuda")
+        if opt.lambda_normal > 0:
+            gt_normal = viewpoint_cam.normal.cuda() # obtained from omnidata
+            loss_normal = normal_loss(normal, gt_normal)
+            loss = loss + opt.lambda_normal * loss_normal
+
+        # Pseudo Normal Loss (rendered normals & normals estimated from rendered depth)
+        loss_pseudo_normal = torch.tensor(0.0, device="cuda")
+        if opt.lambda_pseudo_normal > 0:
+            loss_pseudo_normal = normal_loss(normal, pseudo_normal.detach())
+            loss = loss + opt.lambda_pseudo_normal * loss_pseudo_normal
+
+        # Opacity Loss
+        loss_alpha = torch.tensor(0.0, device="cuda")
+        if opt.lambda_alpha > 0:
+            alpha = image[3, ...]  # (4, H, W) -> (H, W)
+            loss_alpha = opacity_loss(alpha)
+            loss_alpha = sparsity_loss(alpha)
+            loss = loss + opt.lambda_alpha * loss_alpha
+        
         loss.backward()
 
         iter_end.record()
@@ -103,8 +139,16 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             if iteration == opt.iterations:
                 progress_bar.close()
 
+            losses = {
+                "rgb_l1_loss": loss_rgb.item(),
+                "depth_loss": loss_depth.item(),
+                "normal_loss": loss_normal.item(),
+                "alpha_loss": loss_alpha.item(),
+                "total_loss": loss.item()
+            }
+
             # Log and save
-            training_report(tb_writer, iteration, Ll1, loss, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background))
+            training_report(iteration, losses, l1_loss, iter_start.elapsed_time(iter_end), testing_iterations, scene, render, (pipe, background), use_wandb)
             if (iteration in saving_iterations):
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 scene.save(iteration)
@@ -145,19 +189,11 @@ def prepare_output_and_logger(args):
     with open(os.path.join(args.model_path, "cfg_args"), 'w') as cfg_log_f:
         cfg_log_f.write(str(Namespace(**vars(args))))
 
-    # Create Tensorboard writer
-    tb_writer = None
-    if TENSORBOARD_FOUND:
-        tb_writer = SummaryWriter(args.model_path)
-    else:
-        print("Tensorboard not available: not logging progress")
-    return tb_writer
-
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs):
-    if tb_writer:
-        tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
-        tb_writer.add_scalar('train_loss_patches/total_loss', loss.item(), iteration)
-        tb_writer.add_scalar('iter_time', elapsed, iteration)
+def training_report(iteration, losses, l1_loss, elapsed, testing_iterations, scene : Scene, renderFunc, renderArgs, use_wandb):
+    if use_wandb:
+        info = losses.copy()
+        info.update({"iter_time": elapsed, "iter": iteration})
+        wandb.log(info)
 
     # Report test and samples of training set
     if iteration in testing_iterations:
@@ -172,22 +208,21 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                 for idx, viewpoint in enumerate(config['cameras']):
                     image = torch.clamp(renderFunc(viewpoint, scene.gaussians, *renderArgs)["render"], 0.0, 1.0)
                     gt_image = torch.clamp(viewpoint.original_image.to("cuda"), 0.0, 1.0)
-                    if tb_writer and (idx < 5):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name), image[None], global_step=iteration)
-                        if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name), gt_image[None], global_step=iteration)
+                    # saving images to wandb
+                    # if use_wandb:
+                    #     if idx < 5:
+                    #         wandb.log({config['name'] + "_view_{}/render".format(viewpoint.image_name): [wandb.Image(image)]})
+                    #         if iteration == testing_iterations[0]:
+                    #             wandb.log({config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name): [wandb.Image(gt_image)]})
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
                 psnr_test /= len(config['cameras'])
                 l1_test /= len(config['cameras'])          
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
-                if tb_writer:
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
-
-        if tb_writer:
-            tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
-            tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
+                if use_wandb:
+                    wandb.log({config['name'] + "/loss_viewpoint - l1_loss": l1_test, config['name'] + "/loss_viewpoint - psnr": psnr_test})
+        if use_wandb:
+            wandb.log({"total_points": scene.gaussians.get_xyz.shape[0], "iter": iteration})
         torch.cuda.empty_cache()
 
 if __name__ == "__main__":
@@ -205,10 +240,17 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    # additional argument for using wandb
+    parser.add_argument("--use_wandb", action='store_true', default=False, help="Use wandb to record loss value")
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
     print("Optimizing " + args.model_path)
+
+    if args.use_wandb:
+        wandb.init(project="gaussian-splatting")
+        wandb.config.args = args
+        wandb.run.name = args.model_path
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
@@ -216,7 +258,7 @@ if __name__ == "__main__":
     # Start GUI server, configure and run training
     network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from, args.use_wandb)
 
     # All done
     print("\nTraining complete.")

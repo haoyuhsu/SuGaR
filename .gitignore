@@ -138,3 +138,6 @@ dmypy.json
 # Pyre type checker
 .pyre/
 learnableearthparser/fast_sampler/_sampler.c
+
+gaussian_splatting/submodules/diff-gaussian-rasterization/build/
+gaussian_splatting/submodules/diff-gaussian-rasterization/diff_gaussian_rasterization.egg-info/

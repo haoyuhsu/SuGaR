@@ -14,6 +14,9 @@ if __name__ == "__main__":
     parser.add_argument('-c', '--checkpoint_path', 
                         type=str, 
                         help='(Required) path to the vanilla 3D Gaussian Splatting Checkpoint to load.')  # --OK
+    parser.add_argument('--coarse_mesh_path',
+                        type=str,
+                        help='(Required) Path to the coarse mesh.')  # --OK
     parser.add_argument('-m', '--refined_model_path',
                         type=str, 
                         help='(Required) Path to the refine model checkpoint.')  # --OK

@@ -62,3 +62,90 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
     else:
         return ssim_map.mean(1).mean(1).mean(1)
 
+def compute_scale_and_shift(prediction, target):
+    '''
+    Compute the scale and shift between the two depth maps
+    Adapted from Instant-NGP-PP (https://github.com/zhihao-lin/instant-ngp-pp)
+    '''
+    # system matrix: A = [[a_00, a_01], [a_10, a_11]]
+    a_00 = torch.sum(prediction * prediction)
+    a_01 = torch.sum(prediction)
+    ones = torch.ones_like(prediction)
+    a_11 = torch.sum(ones)
+
+    # right hand side: b = [b_0, b_1]
+    b_0 = torch.sum(prediction * target)
+    b_1 = torch.sum(target)
+
+    # solution: x = A^-1 . b = [[a_11, -a_01], [-a_10, a_00]] / (a_00 * a_11 - a_01 * a_10) . b
+    # x_0 = torch.zeros_like(b_0)
+    # x_1 = torch.zeros_like(b_1)
+
+    det = a_00 * a_11 - a_01 * a_01
+    if det != 0:
+        x_0 = (a_11 * b_0 - a_01 * b_1) / det
+        x_1 = (-a_01 * b_0 + a_00 * b_1) / det
+    else:
+        x_0 = torch.FloatTensor(0).cuda()
+        x_1 = torch.FloatTensor(0).cuda()
+
+    return x_0, x_1
+
+def depth_loss(network_output, gt, scene_scale=5.0):
+    '''
+    Use monocular depth to regularize the depth prediction
+    Adapted from Instant-NGP-PP (https://github.com/zhihao-lin/instant-ngp-pp)
+    '''
+    network_output = network_output.view(-1)
+    gt = gt.view(-1)
+
+    # Option 1: use whole GT depth map
+    depth_2d = gt / 25
+    mask = depth_2d > 0
+    weight = torch.zeros_like(depth_2d).cuda()
+    weight[mask] = 1.
+    scale, shift = compute_scale_and_shift(network_output[mask].detach(), depth_2d[mask])
+
+    # Option 2: use GT depth map but only consider network_output < scene_scale
+    # depth_2d = gt / 25
+    # mask = torch.logical_and(depth_2d > 0, network_output.detach() < scene_scale)
+    # weight = torch.zeros_like(depth_2d).cuda()
+    # weight[mask] = 1.
+    # scale, shift = compute_scale_and_shift(network_output[mask].detach(), depth_2d[mask])
+
+    return torch.mean(weight * torch.exp(-network_output.detach() / scene_scale) * (scale * network_output + shift - depth_2d) ** 2)
+
+def normal_loss(network_output, gt, depth=None, scene_scale=5.0):
+    '''
+    Use normal to regularize the normal prediction
+    Adapted from Instant-NGP-PP (https://github.com/zhihao-lin/instant-ngp-pp)
+    '''
+    assert network_output.shape[-1] == 3                                 # expected shape: (H, W, 3)
+    normal_pred = F.normalize(network_output, p=2, dim=-1)               # (H, W, 3)
+    normal_gt = F.normalize(gt, p=2, dim=-1)                             # (H, W, 3)
+    if depth is not None:
+        mask = torch.logical_and(depth > 0, depth < scene_scale)
+        normal_pred = normal_pred[mask]
+        normal_gt = normal_gt[mask]
+    l1_loss = torch.abs(normal_pred - normal_gt).mean()                  # L1 loss (H, W, 3)
+    cos_loss = -torch.sum(normal_pred * normal_gt, axis=-1).mean()       # Cosine similarity loss (H, W, 3)
+    return l1_loss + 0.1 * cos_loss
+
+def opacity_loss(network_output):
+    '''
+    Use opacity to regularize it to be 0 or 1 to avoid floater
+    Adapted from Instant-NGP-PP (https://github.com/zhihao-lin/instant-ngp-pp)
+    '''
+    # TODO: add image mask (refer to Relightable-3D-Gaussian)
+    o = network_output.clamp(1e-6, 1 - 1e-6)
+    return torch.mean(-o * torch.log(o))
+
+def sparsity_loss(network_output):
+    '''
+    Use to regularize opacity values of each gaussian to approach either 0 or 1
+    Adapted from GaussianShader (https://github.com/Asparagus15/GaussianShader/blob/main/utils/loss_utils.py)
+    '''
+    zero_epsilon = 1e-3
+    val = torch.clamp(network_output, zero_epsilon, 1 - zero_epsilon)
+    loss = torch.mean(torch.log(val) + torch.log(1 - val))
+    return loss

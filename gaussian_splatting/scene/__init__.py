@@ -18,6 +18,13 @@ from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 
+import torch
+import numpy as np
+from tqdm import tqdm
+from scene.cameras import Camera
+from utils.graphics_utils import focal2fov
+
+
 class Scene:
 
     gaussians : GaussianModel
@@ -41,7 +48,7 @@ class Scene:
         self.test_cameras = {}
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args.depth_path, args.normal_path)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
@@ -91,3 +98,42 @@ class Scene:
 
     def getTestCameras(self, scale=1.0):
         return self.test_cameras[scale]
+    
+    def loadCustomCameras(self, hparams):
+
+        # get the info of custom camera trajectory
+        custom_traj_folder = os.path.join(hparams.source_path, "custom_camera_path")
+        with open(os.path.join(custom_traj_folder, hparams.custom_traj_name + '.json'), 'r') as f:
+            custom_traj = json.load(f)
+
+        # get camera poses and intrinsics
+        fx, fy, cx, cy = custom_traj["fl_x"], custom_traj["fl_y"], custom_traj["cx"], custom_traj["cy"]
+        w, h = custom_traj["w"], custom_traj["h"]
+        c2w_dict = {}
+        for frame in custom_traj["frames"]:
+            c2w_dict[frame["filename"]] = np.array(frame["transform_matrix"])
+        c2w_dict = dict(sorted(c2w_dict.items()))
+        self.c2w_dict = c2w_dict
+
+        # camera list
+        custom_cameras = []
+        for idx, (filename, c2w) in enumerate(tqdm(c2w_dict.items(), desc="Rendering progress")):
+            w2c = np.linalg.inv(c2w)
+            R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            T = w2c[:3, 3]
+            FovY = focal2fov(fy, h)
+            FovX = focal2fov(fx, w)
+            view = Camera(
+                colmap_id=1, R=R, T=T, 
+                FoVx=FovX, FoVy=FovY, image=torch.zeros(4, h, w), gt_alpha_mask=None, 
+                image_name='{0:05d}'.format(idx), uid=idx)
+            custom_cameras.append(view)
+
+        self.custom_cameras = custom_cameras
+        
+        # store information for blender rendering
+        self.img_wh = (w, h)
+        self.K = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+        self.c2w = np.array([c2w_dict[frame] for frame in c2w_dict])
+
+        return custom_cameras
