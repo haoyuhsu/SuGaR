@@ -2147,13 +2147,76 @@ class SuGaR(nn.Module):
             scales = scales,
             rotations = quaternions,
             cov3D_precomp = cov3D)
+
+        ############################################################
+        # Customized Rendering to get normal and pseudo normal     #
+        ############################################################
+
+        # concatenate RGB image with alpha image
+        rendered_image = torch.cat((rendered_image, alpha_image), dim=0) # (4, H, W)
+
+        depth_image = depth_image.squeeze(0)  # (1, H, W) -> (H, W)
+
+        render_extras = {}
+
+        # compute normal image (reference: GaussianShader)
+        from gaussian_splatting.utils.general_utils import flip_align_view
+        render_directions = torch.nn.functional.normalize(positions - camera_center, dim=-1)
+        normal_axis = self.get_smallest_axis()
+        normal_axis, positive = flip_align_view(normal_axis, render_directions)
+        normal = normal_axis / normal_axis.norm(dim=1, keepdim=True)    # (N, 3)
+        normal_normed = normal * 0.5 + 0.5                  # from [-1, 1] to [0, 1]
+        render_extras["normal"] = normal_normed
+
+        out_extras = {}
+        for k in render_extras.keys():
+            if render_extras[k] is None: continue
+            image = rasterizer(
+                means3D = positions,
+                means2D = means2D,
+                shs = None,
+                colors_precomp = render_extras[k],
+                opacities = splat_opacities,
+                scales = scales,
+                rotations = quaternions,
+                cov3D_precomp = cov3D)[0]
+            out_extras[k] = image
+
+        for k in ["normal"]:
+            if k in out_extras.keys():
+                out_extras[k] = (out_extras[k] - 0.5) * 2.  # from [0, 1] to [-1, 1]
+        
+        # normalize the normal map
+        normal_image = out_extras["normal"]
+        normal_image = normal_image.permute(1, 2, 0)        # (H, W, 3)
+        normal_image = torch.nn.functional.normalize(normal_image, p=2, dim=-1)
+
+        # compute pseudo normal image from depth with local differences
+        h, w = int(self.image_height), int(self.image_width)
+        fx = fov2focal(self.tanfovx, w)
+        fy = fov2focal(self.tanfovy, h)
+        cx = w / 2
+        cy = h / 2
+        from gaussian_splatting.gaussian_renderer import get_ray_directions, depth_pcd2normal
+        directions = get_ray_directions(h, w, torch.FloatTensor([[fx, 0, cx], [0, fy, cy], [0, 0, 1]]), flatten=False)  # (H, W, 3)
+        c2w = torch.FloatTensor(c2w).to(self.device)
+        rays_d = directions @ c2w[:3, :3].T
+        rays_o = c2w[:3, 3].expand_as(rays_d)
+        depth = depth_image.unsqueeze(-1)   # (H, W, 1)
+        points3D = rays_o + rays_d * depth
+        pseudo_normal = depth_pcd2normal(points3D)
+
+        ############################################################
         
         if not(return_2d_radii or return_opacities or return_colors):
-            return rendered_image.transpose(0, 1).transpose(1, 2)
+            return rendered_image.transpose(0, 1).transpose(1, 2)  # (4, H, W) -> (H, W, 4)
         
         else:
             outputs = {
                 "image": rendered_image.transpose(0, 1).transpose(1, 2),
+                "depth": depth_image,
+                "normal": normal_image,
+                "pseudo_normal": pseudo_normal,
                 "radii": radii,
                 "viewspace_points": screenspace_points,
             }
@@ -2539,7 +2602,7 @@ def extract_texture_image_and_uv_from_gaussians(
             no_initialize_mask = texture_counter[(idx_to_update[..., 0], idx_to_update[..., 1])][..., 0] != 0
             texture_img[(idx_to_update[..., 0], idx_to_update[..., 1])] = no_initialize_mask[..., None] * texture_img[(idx_to_update[..., 0], idx_to_update[..., 1])]
 
-            texture_img[(idx_to_update[..., 0], idx_to_update[..., 1])] = texture_img[(idx_to_update[..., 0], idx_to_update[..., 1])] + rgb_img[update_mask]
+            texture_img[(idx_to_update[..., 0], idx_to_update[..., 1])] = texture_img[(idx_to_update[..., 0], idx_to_update[..., 1])] + rgb_img[update_mask][..., 0:3]
             texture_counter[(idx_to_update[..., 0], idx_to_update[..., 1])] = texture_counter[(idx_to_update[..., 0], idx_to_update[..., 1])] + 1
 
     if use_average:

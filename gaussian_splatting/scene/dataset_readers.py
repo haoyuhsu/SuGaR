@@ -22,6 +22,7 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
+import torch
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -67,7 +68,7 @@ def getNerfppNorm(cam_info):
 
     return {"translate": translate, "radius": radius}
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folder=None, normal_folder=None):
+def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folder=None, normal_folder=None, image_resolution=1, max_img_size=1600):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
@@ -100,7 +101,8 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folde
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
         depth_path = os.path.join(depth_folder, image_name + '_depth.npy')
-        depth = np.load(depth_path) if os.path.exists(depth_path) else None
+        # depth = np.load(depth_path) if os.path.exists(depth_path) else None
+        depth = None
         normal_path = os.path.join(normal_folder, image_name + '_normal.npy')
         normal = np.load(normal_path) if os.path.exists(normal_path) else None
         if normal is not None:
@@ -109,6 +111,26 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folde
             W2C = getWorld2View2(R, T)
             C2W = np.linalg.inv(W2C)
             normal = normal @ C2W[:3, :3].T             # transform normal to world space
+
+        ##### resize image here to save memory #####
+        orig_w, orig_h = image.size
+        downscale_factor = 1
+        if image_resolution in [1, 2, 4, 8]:
+            downscale_factor = image_resolution
+        if max(orig_h, orig_w) > max_img_size:
+            additional_downscale_factor = max(orig_h, orig_w) / max_img_size
+            downscale_factor = additional_downscale_factor * downscale_factor
+        resolution = round(orig_w/(downscale_factor)), round(orig_h/(downscale_factor))
+        resized_image = image.resize(resolution)
+        image = resized_image
+        if depth is not None:
+            depth = torch.from_numpy(depth).unsqueeze(0).unsqueeze(0)
+            depth = torch.nn.functional.interpolate(depth, (resolution[1], resolution[0]), mode='bilinear', align_corners=True)
+            depth = depth.squeeze(0).squeeze(0).numpy()          # (H, W)
+        if normal is not None:
+            normal = torch.from_numpy(normal).permute(2, 0, 1).unsqueeze(0)
+            normal = torch.nn.functional.interpolate(normal, (resolution[1], resolution[0]), mode='nearest')
+            normal = normal.squeeze(0).permute(1, 2, 0).numpy()  # (H, W, 3)
 
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                               image_path=image_path, image_name=image_name, width=width, height=height,
@@ -142,7 +164,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, depth_path, normal_path, llffhold=8):
+def readColmapSceneInfo(path, images, eval, depth_path, normal_path, image_resolution=1, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -158,7 +180,7 @@ def readColmapSceneInfo(path, images, eval, depth_path, normal_path, llffhold=8)
     depth_dir = 'depth' if depth_path == None else depth_path
     normal_dir = 'normal' if normal_path == None else normal_path
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, \
-                    images_folder=os.path.join(path, reading_dir), depth_folder=os.path.join(path, depth_dir), normal_folder=os.path.join(path, normal_dir))
+                    images_folder=os.path.join(path, reading_dir), depth_folder=os.path.join(path, depth_dir), normal_folder=os.path.join(path, normal_dir), image_resolution=image_resolution)
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:

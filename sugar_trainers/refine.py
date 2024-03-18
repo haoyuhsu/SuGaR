@@ -560,20 +560,20 @@ def refined_training(args):
                     pred_rgb = outputs['image'].view(-1, 
                         sugar.image_height, 
                         sugar.image_width, 
-                        3)
+                        4)
                     if use_densifier or regularize:
                         radii = outputs['radii']
                         viewspace_points = outputs['viewspace_points']
                     if enforce_entropy_regularization:
                         opacities = outputs['opacities']
                 else:
-                    pred_rgb = outputs.view(-1, sugar.image_height, sugar.image_width, 3)
+                    pred_rgb = outputs.view(-1, sugar.image_height, sugar.image_width, 4)
                 
                 pred_rgb = pred_rgb.transpose(-1, -2).transpose(-2, -3)  # TODO: Change for torch.permute
                 
                 # Gather rgb ground truth
                 gt_image = nerfmodel.get_gt_image(camera_indices=camera_indices)           
-                gt_rgb = gt_image.view(-1, sugar.image_height, sugar.image_width, 3)
+                gt_rgb = gt_image.view(-1, sugar.image_height, sugar.image_width, 4)
                 gt_rgb = gt_rgb.transpose(-1, -2).transpose(-2, -3)
                     
                 # Compute loss 
@@ -871,7 +871,7 @@ def refined_training(args):
         # Build path
         CONSOLE.print("\nExporting ply file with refined Gaussians...")
         tmp_list = model_path.split(os.sep)
-        tmp_list[-4] = 'refined_ply'
+        tmp_list[-3] = 'refined_ply'
         tmp_list.pop(-1)
         tmp_list[-1] = tmp_list[-1] + '.ply'
         refined_ply_save_dir = os.path.join(*tmp_list[:-1])

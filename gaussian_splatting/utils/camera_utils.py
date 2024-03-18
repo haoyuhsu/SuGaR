@@ -20,24 +20,27 @@ WARNED = False
 def loadCam(args, id, cam_info, resolution_scale):
     orig_w, orig_h = cam_info.image.size
 
-    if args.resolution in [1, 2, 4, 8]:
-        resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
-    else:  # should be a type that converts to float
-        if args.resolution == -1:
-            if orig_w > 1600:
-                global WARNED
-                if not WARNED:
-                    print("[ INFO ] Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.\n "
-                        "If this is not desired, please explicitly specify '--resolution/-r' as 1")
-                    WARNED = True
-                global_down = orig_w / 1600
-            else:
-                global_down = 1
-        else:
-            global_down = orig_w / args.resolution
+    # (Already rescaled in dataset_readers.py)
+    # if args.resolution in [1, 2, 4, 8]:
+    #     resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
+    # else:  # should be a type that converts to float
+    #     if args.resolution == -1:
+    #         if orig_w > 1600:
+    #             global WARNED
+    #             if not WARNED:
+    #                 print("[ INFO ] Encountered quite large input images (>1.6K pixels width), rescaling to 1.6K.\n "
+    #                     "If this is not desired, please explicitly specify '--resolution/-r' as 1")
+    #                 WARNED = True
+    #             global_down = orig_w / 1600
+    #         else:
+    #             global_down = 1
+    #     else:
+    #         global_down = orig_w / args.resolution
 
-        scale = float(global_down) * float(resolution_scale)
-        resolution = (int(orig_w / scale), int(orig_h / scale))
+    #     scale = float(global_down) * float(resolution_scale)
+    #     resolution = (int(orig_w / scale), int(orig_h / scale))
+
+    resolution = (int(orig_w), int(orig_h))
 
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
@@ -46,21 +49,20 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
-
-    # depth = torch.from_numpy(cam_info.depth) if cam_info.depth is not None else None
-    # normal = torch.from_numpy(cam_info.normal) if cam_info.normal is not None else None
         
-    # resize depth and normal
-    depth = None
-    normal = None
-    if cam_info.depth is not None:
-        depth = torch.from_numpy(cam_info.depth).unsqueeze(0).unsqueeze(0)
-        depth = torch.nn.functional.interpolate(depth, (resolution[1], resolution[0]), mode='bilinear', align_corners=True)
-        depth = depth.squeeze(0).squeeze(0)          # (H, W)
-    if cam_info.normal is not None:
-        normal = torch.from_numpy(cam_info.normal).permute(2, 0, 1).unsqueeze(0)
-        normal = torch.nn.functional.interpolate(normal, (resolution[1], resolution[0]), mode='nearest')
-        normal = normal.squeeze(0).permute(1, 2, 0)  # (H, W, 3)
+    # resize depth and normal (Already rescaled in dataset_readers.py)
+    # depth = None
+    # normal = None
+    # if cam_info.depth is not None:
+    #     depth = torch.from_numpy(cam_info.depth).unsqueeze(0).unsqueeze(0)
+    #     depth = torch.nn.functional.interpolate(depth, (resolution[1], resolution[0]), mode='bilinear', align_corners=True)
+    #     depth = depth.squeeze(0).squeeze(0)          # (H, W)
+    # if cam_info.normal is not None:
+    #     normal = torch.from_numpy(cam_info.normal).permute(2, 0, 1).unsqueeze(0)
+    #     normal = torch.nn.functional.interpolate(normal, (resolution[1], resolution[0]), mode='nearest')
+    #     normal = normal.squeeze(0).permute(1, 2, 0)  # (H, W, 3)
+    depth = torch.from_numpy(cam_info.depth) if cam_info.depth is not None else None
+    normal = torch.from_numpy(cam_info.normal) if cam_info.normal is not None else None
 
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 

@@ -13,7 +13,7 @@ from sugar_utils.general_utils import PILtoTorch
 
 
 def load_gs_cameras(source_path, gs_output_path, image_resolution=1, 
-                    load_gt_images=True, max_img_size=1920):
+                    load_gt_images=True, max_img_size=1600):  # original max_img_size=1920
     """Loads Gaussian Splatting camera parameters from a COLMAP reconstruction.
 
     Args:
@@ -27,6 +27,8 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
         List of GSCameras: List of Gaussian Splatting cameras.
     """
     image_dir = os.path.join(source_path, 'images')
+    depth_dir = os.path.join(source_path, 'depth')
+    normal_dir = os.path.join(source_path, 'normal')
     
     with open(gs_output_path + 'cameras.json') as f:
         unsorted_camera_transforms = json.load(f)
@@ -67,6 +69,8 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
         id = camera_transform['id']
         name = camera_transform['img_name']
         image_path = os.path.join(image_dir,  name + extension)
+        depth_path = os.path.join(depth_dir,  name + '_depth.npy')
+        normal_path = os.path.join(normal_dir,  name + '_normal.npy')
         
         if load_gt_images:
             image = Image.open(image_path)
@@ -83,6 +87,26 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
             gt_image = resized_image_rgb[:3, ...]
             
             image_height, image_width = None, None
+
+            # load depth and normal
+            # depth = np.load(depth_path) if os.path.exists(depth_path) else None
+            depth = None   # depth supervision not used currently
+            normal = np.load(normal_path) if os.path.exists(normal_path) else None
+            if normal is not None:
+                normal = np.transpose(normal, (1, 2, 0))    # (3, H, W) -> (H, W, 3)
+                normal = (normal - 0.5) * 2                 # normalize to [-1, 1]
+                C2W = np.linalg.inv(W2C)
+                normal = normal @ C2W[:3, :3].T             # transform normal from camera space (omnidata) to world space
+            # resize depth and normal
+            if depth is not None:
+                depth = torch.from_numpy(depth).unsqueeze(0).unsqueeze(0)
+                depth = torch.nn.functional.interpolate(depth, (resolution[1], resolution[0]), mode='bilinear', align_corners=True)
+                depth = depth.squeeze(0).squeeze(0)          # (H, W)
+            if normal is not None:
+                normal = torch.from_numpy(normal).permute(2, 0, 1).unsqueeze(0)
+                normal = torch.nn.functional.interpolate(normal, (resolution[1], resolution[0]), mode='nearest')
+                normal = normal.squeeze(0).permute(1, 2, 0)  # (H, W, 3)
+
         else:
             gt_image = None
             if image_resolution in [1, 2, 4, 8]:
@@ -92,12 +116,16 @@ def load_gs_cameras(source_path, gs_output_path, image_resolution=1,
                 additional_downscale_factor = max(height, width) / max_img_size
                 downscale_factor = additional_downscale_factor * downscale_factor
             image_height, image_width = round(height/downscale_factor), round(width/downscale_factor)
+
+            normal = None
+            depth = None
         
         gs_camera = GSCamera(
             colmap_id=id, image=gt_image, gt_alpha_mask=None,
             R=R, T=T, FoVx=fov_x, FoVy=fov_y,
             image_name=name, uid=id,
-            image_height=image_height, image_width=image_width,)
+            image_height=image_height, image_width=image_width,
+            depth=depth, normal=normal)
         
         cam_list.append(gs_camera)
 
@@ -111,6 +139,7 @@ class GSCamera(torch.nn.Module):
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
                  image_height=None, image_width=None,
+                 depth=None, normal=None
                  ):
         """
         Args:
@@ -128,6 +157,8 @@ class GSCamera(torch.nn.Module):
             data_device (str, optional): _description_. Defaults to "cuda".
             image_height (_type_, optional): _description_. Defaults to None.
             image_width (_type_, optional): _description_. Defaults to None.
+            depth (np.array, optional): depth image from omnidata. Defaults to None.
+            normal (np.array, optional): normal image from omnidata. Defaults to None.
 
         Raises:
             ValueError: _description_
@@ -160,6 +191,9 @@ class GSCamera(torch.nn.Module):
             self.image_width = self.original_image.shape[2]
             self.image_height = self.original_image.shape[1]
 
+            # extend additional alpha channel to original_image
+            self.original_image = torch.cat([self.original_image, torch.ones((1, self.image_height, self.image_width), device=self.data_device)], dim=0)
+
             if gt_alpha_mask is not None:
                 self.original_image *= gt_alpha_mask.to(self.data_device)
             else:
@@ -175,6 +209,9 @@ class GSCamera(torch.nn.Module):
         self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
         self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+
+        self.depth = depth.to(self.data_device) if depth is not None else None
+        self.normal = normal.to(self.data_device) if normal is not None else None
         
     @property
     def device(self):
