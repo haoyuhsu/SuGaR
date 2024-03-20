@@ -40,6 +40,11 @@ if __name__ == "__main__":
     parser.add_argument('--use_vanilla_3dgs', type=str2bool, default=False, 
                         help='If True, use vanilla 3DGS to extract mesh.')
     
+    parser.add_argument('--poisson_depth', type=int, default=10, 
+                        help='10 for most real scenes. 6 or 7 work well for most synthetic scenes.')
+    parser.add_argument('--vertices_density_quantile', type=float, default=0.1,
+                        help='0.1 for most real scenes. 0. works well for most synthetic scenes.')
+    
     args = parser.parse_args()
     
     # Call function

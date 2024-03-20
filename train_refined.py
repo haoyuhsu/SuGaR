@@ -41,6 +41,8 @@ if __name__ == "__main__":
     
     parser.add_argument('--export_ply', type=str2bool, default=True, 
                         help='If True, export a ply files with the refined 3D Gaussians at the end of the training.')
+    
+    parser.add_argument('--lambda_normal', type=float, default=1e-2, help='Weight for normal loss.')
 
     args = parser.parse_args()
     

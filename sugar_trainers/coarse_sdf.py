@@ -71,9 +71,9 @@ def coarse_training_with_sdf_regularization(args):
     # Additional regularization loss  #
     ###################################
     lambda_depth = 0.0
-    lambda_alpha = 2e-4
+    lambda_alpha = 0.0
     lambda_pseudo_normal = 0.0
-    lambda_normal = 1e-2
+    lambda_normal = float(args.lambda_normal)
 
         
     # Densifier and pruning

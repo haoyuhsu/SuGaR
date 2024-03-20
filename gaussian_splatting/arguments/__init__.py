@@ -90,9 +90,9 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
         self.random_background = False
         self.lambda_depth = 0.0
-        self.lambda_alpha = 2e-4
+        self.lambda_alpha = 0.0
         self.lambda_pseudo_normal = 0.0
-        self.lambda_normal = 1e-3
+        self.lambda_normal = 1e-2
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

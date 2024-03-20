@@ -9,6 +9,7 @@ from sugar_scene.sugar_model import SuGaR, convert_refined_sugar_into_gaussians
 from sugar_scene.sugar_optimizer import OptimizationParams, SuGaROptimizer
 from sugar_scene.sugar_densifier import SuGaRDensifier
 from sugar_utils.loss_utils import ssim, l1_loss, l2_loss
+from gaussian_splatting.utils.loss_utils import depth_loss, opacity_loss, normal_loss, sparsity_loss
 
 from rich.console import Console
 import time
@@ -65,6 +66,14 @@ def refined_training(args):
     opacity_lr=0.05
     scaling_lr=0.005
     rotation_lr=0.001
+
+    ###################################
+    # Additional regularization loss  #
+    ###################################
+    lambda_depth = 0.0
+    lambda_alpha = 0.0
+    lambda_pseudo_normal = 0.0
+    lambda_normal = float(args.lambda_normal)
         
     # Densifier and pruning
     use_densifier = True
@@ -496,7 +505,13 @@ def refined_training(args):
         def loss_fn(pred_rgb, gt_rgb):
             return (1.0 - dssim_factor) * l1_loss(pred_rgb, gt_rgb) + dssim_factor * (1.0 - ssim(pred_rgb, gt_rgb))
     CONSOLE.print(f'Using loss function: {loss_function}')
-    
+
+    # Print loss function lambda weights
+    CONSOLE.print("-----Loss function lambda weights-----")
+    CONSOLE.print(f'Lambda depth: {float(lambda_depth)}')
+    CONSOLE.print(f'Lambda normal: {float(lambda_normal)}')
+    CONSOLE.print(f'Lambda pseudo normal: {float(lambda_pseudo_normal)}')
+    CONSOLE.print(f'Lambda alpha: {float(lambda_alpha)}\n')
     
     # ====================Start training====================
     sugar.train()
@@ -551,23 +566,23 @@ def refined_training(args):
                     sh_rotations=None,
                     compute_color_in_rasterizer=compute_color_in_rasterizer,
                     compute_covariance_in_rasterizer=True,
-                    return_2d_radii=use_densifier or regularize,
+                    return_2d_radii=True,  # use_densifier or regularize,
                     quaternions=None,
                     use_same_scale_in_all_directions=use_same_scale_in_all_directions,
                     return_opacities=enforce_entropy_regularization,
                     )
-                if use_densifier or regularize or enforce_entropy_regularization:
-                    pred_rgb = outputs['image'].view(-1, 
-                        sugar.image_height, 
-                        sugar.image_width, 
-                        4)
-                    if use_densifier or regularize:
-                        radii = outputs['radii']
-                        viewspace_points = outputs['viewspace_points']
-                    if enforce_entropy_regularization:
-                        opacities = outputs['opacities']
-                else:
-                    pred_rgb = outputs.view(-1, sugar.image_height, sugar.image_width, 4)
+                # if use_densifier or regularize or enforce_entropy_regularization:
+                pred_rgb = outputs['image'].view(-1, 
+                    sugar.image_height, 
+                    sugar.image_width, 
+                    4)
+                if use_densifier or regularize:
+                    radii = outputs['radii']
+                    viewspace_points = outputs['viewspace_points']
+                if enforce_entropy_regularization:
+                    opacities = outputs['opacities']
+                # else:
+                #     pred_rgb = outputs.view(-1, sugar.image_height, sugar.image_width, 4)
                 
                 pred_rgb = pred_rgb.transpose(-1, -2).transpose(-2, -3)  # TODO: Change for torch.permute
                 
@@ -578,6 +593,42 @@ def refined_training(args):
                     
                 # Compute loss 
                 loss = loss_fn(pred_rgb, gt_rgb)
+
+                #############################################################
+                # Customized loss functions                                 #
+                #############################################################
+                depth = outputs["depth"]                 # (H, W)
+                normal = outputs["normal"]               # (H, W, 3)
+                pseudo_normal = outputs["pseudo_normal"] # (H, W, 3)
+
+                # Depth Loss
+                loss_depth = torch.tensor(0.0, device="cuda")
+                if lambda_depth > 0:
+                    gt_depth = nerfmodel.cam_list[camera_indices].depth.cuda()  # obtained from omnidata
+                    loss_depth = depth_loss(depth, gt_depth)
+                    loss = loss + lambda_depth * loss_depth
+
+                # Normal Loss (rendered normals & normals estimated from omnidata)
+                loss_normal = torch.tensor(0.0, device="cuda")
+                if lambda_normal > 0:
+                    gt_normal = nerfmodel.cam_list[camera_indices].normal.cuda() # obtained from omnidata
+                    loss_normal = normal_loss(normal, gt_normal)
+                    loss = loss + lambda_normal * loss_normal
+
+                # Pseudo Normal Loss (rendered normals & normals estimated from rendered depth)
+                loss_pseudo_normal = torch.tensor(0.0, device="cuda")
+                if lambda_pseudo_normal > 0:
+                    loss_pseudo_normal = normal_loss(normal, pseudo_normal.detach())
+                    loss = loss + lambda_pseudo_normal * loss_pseudo_normal
+
+                # Opacity Loss
+                # loss_alpha = torch.tensor(0.0, device="cuda")
+                # if lambda_alpha > 0:
+                #     alpha = outputs['image'][..., 3]  # (H, W, 4) -> (H, W)
+                #     loss_alpha = opacity_loss(alpha)
+                #     loss_alpha = sparsity_loss(alpha)
+                #     loss = loss + lambda_alpha * loss_alpha
+                #############################################################
                         
                 if enforce_entropy_regularization and iteration > start_entropy_regularization_from and iteration < end_entropy_regularization_at:
                     if iteration == start_entropy_regularization_from + 1:

@@ -26,6 +26,8 @@ if __name__ == "__main__":
     
     parser.add_argument('--gpu', type=int, default=0, help='Index of GPU device to use.')
 
+    parser.add_argument('--lambda_normal', type=float, default=1e-2, help='Weight for normal loss.')
+
     args = parser.parse_args()
     
     # Call function
