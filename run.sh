@@ -12,14 +12,14 @@
 # VERTICES_DENSITY_QUANTILE: 0.1*, 0.0
 # NORMAL_CONSISTENCY_FACTOR: 0.1*
 
-bash train.sh garden
+bash train.sh garden 0.01 10 0.0 0.1
 
-bash train.sh counter
+bash train.sh counter 0.01 10 0.0 0.1
 
-bash train.sh donuts
+bash train.sh donuts 0.01 10 0.0 0.1
 
-bash train.sh figurines
+bash train.sh figurines 0.01 10 0.0 0.1
 
-bash train.sh ramen
+bash train.sh ramen 0.01 10 0.0 0.1
 
-bash train.sh teatime 0.1 9 0.0 0.1
+bash train.sh teatime 0.01 10 0.0 0.1

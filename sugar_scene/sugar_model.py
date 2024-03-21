@@ -2138,7 +2138,7 @@ class SuGaR(nn.Module):
                 print("scales", scales.shape)
             print("screenspace_points", screenspace_points.shape)
         
-        rendered_image, depth_image, alpha_image, radii = rasterizer(
+        rgb_image, depth_image, alpha_image, radii = rasterizer(
             means3D = positions,
             means2D = means2D,
             shs = shs,
@@ -2153,7 +2153,7 @@ class SuGaR(nn.Module):
         ############################################################
 
         # concatenate RGB image with alpha image
-        rendered_image = torch.cat((rendered_image, alpha_image), dim=0) # (4, H, W)
+        rendered_image = torch.cat((rgb_image, alpha_image), dim=0) # (4, H, W)
 
         depth_image = depth_image.squeeze(0)  # (1, H, W) -> (H, W)
 
@@ -2588,6 +2588,9 @@ def extract_texture_image_and_uv_from_gaussians(
             sh_deg=0,  #rc.sh_levels-1,
             compute_color_in_rasterizer=True,  #compute_color_in_rasterizer,
         ).clamp(min=0, max=1)
+
+        # Get rid of the alpha channel
+        rgb = rgb[..., :3]
         
         fragments = renderer.rasterizer(idx_mesh, cameras=p3d_cameras)
         idx_img = renderer.shader(fragments, idx_mesh, cameras=p3d_cameras)[0, ..., :2]

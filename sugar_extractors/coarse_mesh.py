@@ -262,6 +262,12 @@ def extract_mesh_from_coarse_sugar(args):
                         return_2d_radii=False,
                         use_same_scale_in_all_directions=False,
                     ).clamp(min=0., max=1.).contiguous()
+
+                    # Get rid of the alpha channel (otherwise the .view(-1, 3) will not work properly)
+                    rgb = rgb[..., :3]
+
+                    # DEBUGGING
+                    # print("RGB shape:", rgb.shape)
                     
                     # Compute surface level points for the current frame
                     if cam_idx == 0:
