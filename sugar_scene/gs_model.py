@@ -74,6 +74,7 @@ class GaussianSplattingWrapper:
                  load_gt_images=True,
                  eval_split=False,
                  eval_split_interval=8,
+                 max_img_size=1920,
                  ) -> None:
         """Initialize the Gaussian Splatting model wrapper.
         
@@ -112,6 +113,7 @@ class GaussianSplattingWrapper:
             source_path=source_path,
             gs_output_path=output_path,
             load_gt_images=load_gt_images,
+            max_img_size=max_img_size,
             )
         
         if eval_split:

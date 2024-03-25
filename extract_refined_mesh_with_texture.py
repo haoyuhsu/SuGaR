@@ -42,6 +42,8 @@ if __name__ == "__main__":
     parser.add_argument('--postprocess_iterations', type=int, default=5,
                         help='Number of iterations to use for postprocessing the mesh.')  # --OK
     
+    parser.add_argument('--max_img_size', type=int, default=1920, help='Maximum image size for training. (Default: 1920)')  # --OK
+    
     args = parser.parse_args()
     
     # Call function

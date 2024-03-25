@@ -56,6 +56,7 @@ class ModelParams(ParamGroup):
         self.eval = False
         self.depth_path = "depth"
         self.normal_path = "normal"
+        self.max_img_size = 1600
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):

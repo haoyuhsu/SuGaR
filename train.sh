@@ -1,10 +1,8 @@
 SCENE_NAME=$1
 LAMBDA_NORMAL=$2
-POISSON_DEPTH=$3
-VERTICES_DENSITY_QUANTILE=$4
-NORMAL_CONSISTENCY_FACTOR=$5
+MAX_IMG_SIZE=$3
 
-FOLDER_ROOT_NAME=${SCENE_NAME}_lnorm${LAMBDA_NORMAL}_poisson${POISSON_DEPTH}_quantile${VERTICES_DENSITY_QUANTILE}_normalconsistency${NORMAL_CONSISTENCY_FACTOR}
+FOLDER_ROOT_NAME=${SCENE_NAME}_lnorm${LAMBDA_NORMAL}_imgsize${MAX_IMG_SIZE}
 
 # Step 1: training original gaussian splatting model
 python gaussian_splatting/train.py \
@@ -12,7 +10,9 @@ python gaussian_splatting/train.py \
     --iterations 7000 \
     -m ./output/${FOLDER_ROOT_NAME}/ \
     --lambda_normal ${LAMBDA_NORMAL} \
-    --use_wandb
+    --use_wandb \
+    --data_device cpu \
+    --max_img_size ${MAX_IMG_SIZE}
 
 # Step 2: training coarse sugar model
 python train_coarse_density.py \
@@ -20,7 +20,8 @@ python train_coarse_density.py \
     -s ../datasets/colmap/${SCENE_NAME} \
     -o ./output/${FOLDER_ROOT_NAME}/coarse/ \
     -i 7000 \
-    --lambda_normal ${LAMBDA_NORMAL}
+    --lambda_normal ${LAMBDA_NORMAL} \
+    --max_img_size ${MAX_IMG_SIZE}
 
 # Step 3: extract coarse mesh from coarse sugar model
 python extract_mesh.py \
@@ -31,8 +32,9 @@ python extract_mesh.py \
     --surface_level 0.3 \
     --decimation_target 1_000_000 \
     -o ./output/${FOLDER_ROOT_NAME}/coarse-mesh/ \
-    --poisson_depth ${POISSON_DEPTH} \
-    --vertices_density_quantile ${VERTICES_DENSITY_QUANTILE}
+    --max_img_size ${MAX_IMG_SIZE} \
+    --poisson_depth 10 \
+    --vertices_density_quantile 0.1
 
 # Step 4: training refined sugar model
 python train_refined.py \
@@ -41,7 +43,8 @@ python train_refined.py \
     -i 7000 \
     -o ./output/${FOLDER_ROOT_NAME}/refined/ \
     --mesh_path ./output/${FOLDER_ROOT_NAME}/coarse-mesh/sugarmesh_3Dgs7000_densityestim02_sdfnorm02_level03_decim1000000.ply \
-    --lambda_normal ${LAMBDA_NORMAL}
+    --lambda_normal ${LAMBDA_NORMAL} \
+    --max_img_size ${MAX_IMG_SIZE}
 
 # Step 5: extract textured UV mesh from refined sugar model
 python extract_refined_mesh_with_texture.py \

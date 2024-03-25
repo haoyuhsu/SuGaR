@@ -57,6 +57,9 @@ class Camera(nn.Module):
             else:
                 self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
 
+            ##### DEFAULT MOVE original_image to CUDA (save CPU memory) #####
+            self.original_image = self.original_image.cuda()
+
         self.zfar = 100.0
         self.znear = 0.01
 

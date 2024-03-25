@@ -2590,7 +2590,7 @@ def extract_texture_image_and_uv_from_gaussians(
         ).clamp(min=0, max=1)
 
         # Get rid of the alpha channel
-        rgb = rgb[..., :3]
+        rgb_img = rgb_img[..., :3]
         
         fragments = renderer.rasterizer(idx_mesh, cameras=p3d_cameras)
         idx_img = renderer.shader(fragments, idx_mesh, cameras=p3d_cameras)[0, ..., :2]

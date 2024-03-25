@@ -68,7 +68,7 @@ def getNerfppNorm(cam_info):
 
     return {"translate": translate, "radius": radius}
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folder=None, normal_folder=None, image_resolution=1, max_img_size=1600):
+def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, depth_folder=None, normal_folder=None, image_resolution=1, max_img_size=1920):
     cam_infos = []
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
@@ -164,7 +164,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, depth_path, normal_path, image_resolution=1, llffhold=8):
+def readColmapSceneInfo(path, images, eval, depth_path, normal_path, image_resolution=1, llffhold=8, max_img_size=1920):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -180,7 +180,7 @@ def readColmapSceneInfo(path, images, eval, depth_path, normal_path, image_resol
     depth_dir = 'depth' if depth_path == None else depth_path
     normal_dir = 'normal' if normal_path == None else normal_path
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, \
-                    images_folder=os.path.join(path, reading_dir), depth_folder=os.path.join(path, depth_dir), normal_folder=os.path.join(path, normal_dir), image_resolution=image_resolution)
+                    images_folder=os.path.join(path, reading_dir), depth_folder=os.path.join(path, depth_dir), normal_folder=os.path.join(path, normal_dir), image_resolution=image_resolution, max_img_size=max_img_size)
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
 
     if eval:

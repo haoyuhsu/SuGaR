@@ -15,6 +15,8 @@ def extract_mesh_and_texture_from_refined_sugar(args):
     CONSOLE = Console(width=120)
 
     n_skip_images_for_eval_split = 8
+
+    max_img_size = int(args.max_img_size)
             
     # --- Scene data parameters ---
     source_path = args.scene_path
@@ -97,6 +99,7 @@ def extract_mesh_and_texture_from_refined_sugar(args):
         load_gt_images=False,  # TODO: Check
         eval_split=use_train_test_split,
         eval_split_interval=n_skip_images_for_eval_split,
+        max_img_size=max_img_size,
         )
     CONSOLE.print("Vanilla 3DGS Loaded.")
     CONSOLE.print(f'{len(nerfmodel.training_cameras)} training images detected.')

@@ -15,6 +15,8 @@ def extract_mesh_from_coarse_sugar(args):
     
     all_sugar_mesh_paths = []
 
+    max_img_size = int(args.max_img_size)
+
     # ========== Parameters ==========
 
     use_train_test_split = True
@@ -131,6 +133,7 @@ def extract_mesh_from_coarse_sugar(args):
         load_gt_images=False,
         eval_split=use_train_test_split,
         eval_split_interval=n_skip_images_for_eval_split,
+        max_img_size=max_img_size,
         )
     
     CONSOLE.print(f'{len(nerfmodel.training_cameras)} training images detected.')

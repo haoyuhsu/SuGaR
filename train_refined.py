@@ -43,6 +43,7 @@ if __name__ == "__main__":
                         help='If True, export a ply files with the refined 3D Gaussians at the end of the training.')
     
     parser.add_argument('--lambda_normal', type=float, default=1e-2, help='Weight for normal loss.')
+    parser.add_argument('--max_img_size', type=int, default=1920, help='Maximum image size for training. (Default: 1920)')  # --OK
 
     args = parser.parse_args()
     

@@ -13,7 +13,7 @@ from sugar_utils.general_utils import PILtoTorch
 
 
 def load_gs_cameras(source_path, gs_output_path, image_resolution=1, 
-                    load_gt_images=True, max_img_size=1600):  # original max_img_size=1920
+                    load_gt_images=True, max_img_size=1920):  # original max_img_size=1920
     """Loads Gaussian Splatting camera parameters from a COLMAP reconstruction.
 
     Args:
@@ -137,7 +137,7 @@ class GSCamera(torch.nn.Module):
     """
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda",
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cpu", # default to cuda
                  image_height=None, image_width=None,
                  depth=None, normal=None
                  ):
@@ -173,12 +173,13 @@ class GSCamera(torch.nn.Module):
         self.FoVy = FoVy
         self.image_name = image_name
 
-        try:
-            self.data_device = torch.device(data_device)
-        except Exception as e:
-            print(e)
-            print(f"[Warning] Custom device {data_device} failed, fallback to default cuda device" )
-            self.data_device = torch.device("cuda")
+        # try:
+        #     self.data_device = torch.device(data_device)
+        # except Exception as e:
+        #     print(e)
+        #     print(f"[Warning] Custom device {data_device} failed, fallback to default cuda device" )
+        #     self.data_device = torch.device("cuda")
+        self.data_device = data_device
 
         if image is None:
             if image_height is None or image_width is None:
@@ -198,6 +199,9 @@ class GSCamera(torch.nn.Module):
                 self.original_image *= gt_alpha_mask.to(self.data_device)
             else:
                 self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
+
+            ##### DEFAULT MOVE original_image to CUDA (save CPU memory) #####
+            self.original_image = self.original_image.cuda()
 
         self.zfar = 100.0
         self.znear = 0.01

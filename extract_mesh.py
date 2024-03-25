@@ -45,6 +45,8 @@ if __name__ == "__main__":
     parser.add_argument('--vertices_density_quantile', type=float, default=0.1,
                         help='0.1 for most real scenes. 0. works well for most synthetic scenes.')
     
+    parser.add_argument('--max_img_size', type=int, default=1920, help='Maximum image size for training. (Default: 1920)')  # --OK
+    
     args = parser.parse_args()
     
     # Call function
