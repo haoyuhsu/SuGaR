@@ -23,7 +23,7 @@ if __name__ == "__main__":
     if not os.path.exists(ply_path) or not ply_path.endswith('.ply'):
         raise ValueError('Could not find the refined SuGaR PLY file.')
     
-    obj_path = ply_path.replace('.ply', '.obj').replace('refined_ply', 'refined_mesh')
+    obj_path = ply_path.replace('.ply', '.obj').replace('refined_ply', 'refined-mesh')
     png_path = obj_path.replace('.obj', '.png')
     
     if not os.path.exists(obj_path):
